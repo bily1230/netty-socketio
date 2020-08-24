@@ -35,7 +35,6 @@ public interface SocketIOClient extends ClientOperations, Store {
      * @return HandshakeData
      */
     HandshakeData getHandshakeData();
-
     /**
      * Current client transport protocol
      *
