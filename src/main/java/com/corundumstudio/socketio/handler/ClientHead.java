@@ -1,12 +1,12 @@
 /**
  * Copyright (c) 2012-2019 Nikita Koksharov
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -45,227 +45,235 @@ import java.util.Map.Entry;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * channel
+ */
 public class ClientHead {
 
-    private static final Logger log = LoggerFactory.getLogger(ClientHead.class);
+	private static final Logger log = LoggerFactory.getLogger(ClientHead.class);
 
-    public static final AttributeKey<ClientHead> CLIENT = AttributeKey.<ClientHead>valueOf("client");
+	public static final AttributeKey<ClientHead> CLIENT = AttributeKey.<ClientHead>valueOf("client");
 
-    private final AtomicBoolean disconnected = new AtomicBoolean();
-    private final Map<Namespace, NamespaceClient> namespaceClients = PlatformDependent.newConcurrentHashMap();
-    private final Map<Transport, TransportState> channels = new HashMap<Transport, TransportState>(2);
-    private final HandshakeData handshakeData;
-    private final UUID sessionId;
+	private final AtomicBoolean disconnected = new AtomicBoolean();
+	private final Map<Namespace, NamespaceClient> namespaceClients = PlatformDependent.newConcurrentHashMap();
+	private final Map<Transport, TransportState> channels = new HashMap<Transport, TransportState>(2);
+	private final HandshakeData handshakeData;
+	private final UUID sessionId;
 
-    private final Store store;
-    private final DisconnectableHub disconnectableHub;
-    private final AckManager ackManager;
-    private ClientsBox clientsBox;
-    private final CancelableScheduler disconnectScheduler;
-    private final Configuration configuration;
+	private final Store store;
+	private final DisconnectableHub disconnectableHub;
+	private final AckManager ackManager;
+	private ClientsBox clientsBox;
+	private final CancelableScheduler disconnectScheduler;
+	private final Configuration configuration;
 
-    private Packet lastBinaryPacket;
+	private Packet lastBinaryPacket;
 
-    // TODO use lazy set
-    private volatile Transport currentTransport;
+	// TODO use lazy set
+	private volatile Transport currentTransport;
 
-    public ClientHead(UUID sessionId, AckManager ackManager, DisconnectableHub disconnectable,
-            StoreFactory storeFactory, HandshakeData handshakeData, ClientsBox clientsBox, Transport transport, CancelableScheduler disconnectScheduler,
-            Configuration configuration) {
-        this.sessionId = sessionId;
-        this.ackManager = ackManager;
-        this.disconnectableHub = disconnectable;
-        this.store = storeFactory.createStore(sessionId);
-        this.handshakeData = handshakeData;
-        this.clientsBox = clientsBox;
-        this.currentTransport = transport;
-        this.disconnectScheduler = disconnectScheduler;
-        this.configuration = configuration;
+	public ClientHead(UUID sessionId, AckManager ackManager, DisconnectableHub disconnectable,
+	                  StoreFactory storeFactory, HandshakeData handshakeData, ClientsBox clientsBox, Transport transport, CancelableScheduler disconnectScheduler,
+	                  Configuration configuration) {
+		this.sessionId = sessionId;
+		this.ackManager = ackManager;
+		this.disconnectableHub = disconnectable;
+		this.store = storeFactory.createStore(sessionId);
+		this.handshakeData = handshakeData;
+		this.clientsBox = clientsBox;
+		this.currentTransport = transport;
+		this.disconnectScheduler = disconnectScheduler;
+		this.configuration = configuration;
 
-        channels.put(Transport.POLLING, new TransportState());
-        channels.put(Transport.WEBSOCKET, new TransportState());
-    }
+		channels.put(Transport.POLLING, new TransportState());
+		channels.put(Transport.WEBSOCKET, new TransportState());
+	}
 
-    public void bindChannel(Channel channel, Transport transport) {
-        log.debug("binding channel: {} to transport: {}", channel, transport);
+	public void bindChannel(Channel channel, Transport transport) {
+		log.debug("binding channel: {} to transport: {}", channel, transport);
 
-        TransportState state = channels.get(transport);
-        Channel prevChannel = state.update(channel);
-        if (prevChannel != null) {
-            clientsBox.remove(prevChannel);
-        }
-        clientsBox.add(channel, this);
+		TransportState state = channels.get(transport);
+		Channel prevChannel = state.update(channel);
+		if (prevChannel != null) {
+			clientsBox.remove(prevChannel);
+		}
+		clientsBox.add(channel, this);
 
-        sendPackets(transport, channel);
-    }
+		sendPackets(transport, channel);
+	}
 
-    public void releasePollingChannel(Channel channel) {
-        TransportState state = channels.get(Transport.POLLING);
-        if(channel.equals(state.getChannel())) {
-            clientsBox.remove(channel);
-            state.update(null);
-        }
-    }
+	public void releasePollingChannel(Channel channel) {
+		TransportState state = channels.get(Transport.POLLING);
+		if (channel.equals(state.getChannel())) {
+			clientsBox.remove(channel);
+			state.update(null);
+		}
+	}
 
-    public String getOrigin() {
-        return handshakeData.getHttpHeaders().get(HttpHeaderNames.ORIGIN);
-    }
+	public String getOrigin() {
+		return handshakeData.getHttpHeaders().get(HttpHeaderNames.ORIGIN);
+	}
 
-    public ChannelFuture send(Packet packet) {
-        return send(packet, getCurrentTransport());
-    }
 
-    public void cancelPingTimeout() {
-        SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
-        disconnectScheduler.cancel(key);
-    }
+	public ChannelFuture send(Packet packet) {
+		return send(packet, getCurrentTransport());
+	}
 
-    public void schedulePingTimeout() {
-        SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
-        disconnectScheduler.schedule(key, new Runnable() {
-            @Override
-            public void run() {
-                ClientHead client = clientsBox.get(sessionId);
-                if (client != null) {
-                    client.disconnect();
-                    log.debug("{} removed due to ping timeout", sessionId);
-                }
-            }
-        }, configuration.getPingTimeout() + configuration.getPingInterval(), TimeUnit.MILLISECONDS);
-    }
+	public void cancelPingTimeout() {
+		SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
+		disconnectScheduler.cancel(key);
+	}
 
-    public ChannelFuture send(Packet packet, Transport transport) {
-        TransportState state = channels.get(transport);
-        state.getPacketsQueue().add(packet);
+	/**
+	 * 心跳检测.
+	 */
+	public void schedulePingTimeout() {
+		SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
+		disconnectScheduler.schedule(key, new Runnable() {
+			@Override
+			public void run() {
+				ClientHead client = clientsBox.get(sessionId);
+				if (client != null) {
+					client.disconnect();
+					log.debug("{} removed due to ping timeout", sessionId);
+				}
+			}
+		}, configuration.getPingTimeout() + configuration.getPingInterval(), TimeUnit.MILLISECONDS);
+	}
 
-        Channel channel = state.getChannel();
-        if (channel == null
-                || (transport == Transport.POLLING && channel.attr(EncoderHandler.WRITE_ONCE).get() != null)) {
-            return null;
-        }
-        return sendPackets(transport, channel);
-    }
+	public ChannelFuture send(Packet packet, Transport transport) {
+		TransportState state = channels.get(transport);
+		state.getPacketsQueue().add(packet);
 
-    private ChannelFuture sendPackets(Transport transport, Channel channel) {
-        return channel.writeAndFlush(new OutPacketMessage(this, transport));
-    }
+		Channel channel = state.getChannel();
+		if (channel == null
+				|| (transport == Transport.POLLING && channel.attr(EncoderHandler.WRITE_ONCE).get() != null)) {
+			return null;
+		}
+		return sendPackets(transport, channel);
+	}
 
-    public void removeNamespaceClient(NamespaceClient client) {
-        namespaceClients.remove(client.getNamespace());
-        if (namespaceClients.isEmpty()) {
-            disconnectableHub.onDisconnect(this);
-        }
-    }
+	private ChannelFuture sendPackets(Transport transport, Channel channel) {
+		return channel.writeAndFlush(new OutPacketMessage(this, transport));
+	}
 
-    public NamespaceClient getChildClient(Namespace namespace) {
-        return namespaceClients.get(namespace);
-    }
+	public void removeNamespaceClient(NamespaceClient client) {
+		namespaceClients.remove(client.getNamespace());
+		if (namespaceClients.isEmpty()) {
+			disconnectableHub.onDisconnect(this);
+		}
+	}
 
-    public NamespaceClient addNamespaceClient(Namespace namespace) {
-        NamespaceClient client = new NamespaceClient(this, namespace);
-        namespaceClients.put(namespace, client);
-        return client;
-    }
+	public NamespaceClient getChildClient(Namespace namespace) {
+		return namespaceClients.get(namespace);
+	}
 
-    public Set<Namespace> getNamespaces() {
-        return namespaceClients.keySet();
-    }
+	public NamespaceClient addNamespaceClient(Namespace namespace) {
+		NamespaceClient client = new NamespaceClient(this, namespace);
+		namespaceClients.put(namespace, client);
+		return client;
+	}
 
-    public boolean isConnected() {
-        return !disconnected.get();
-    }
+	public Set<Namespace> getNamespaces() {
+		return namespaceClients.keySet();
+	}
 
-    public void onChannelDisconnect() {
-        cancelPingTimeout();
+	public boolean isConnected() {
+		return !disconnected.get();
+	}
 
-        disconnected.set(true);
-        for (NamespaceClient client : namespaceClients.values()) {
-            client.onDisconnect();
-        }
-        for (TransportState state : channels.values()) {
-            if (state.getChannel() != null) {
-                clientsBox.remove(state.getChannel());
-            }
-        }
-    }
+	public void onChannelDisconnect() {
+		cancelPingTimeout();
 
-    public HandshakeData getHandshakeData() {
-        return handshakeData;
-    }
+		disconnected.set(true);
+		for (NamespaceClient client : namespaceClients.values()) {
+			client.onDisconnect();
+		}
+		for (TransportState state : channels.values()) {
+			if (state.getChannel() != null) {
+				clientsBox.remove(state.getChannel());
+			}
+		}
+	}
 
-    public AckManager getAckManager() {
-        return ackManager;
-    }
+	public HandshakeData getHandshakeData() {
+		return handshakeData;
+	}
 
-    public UUID getSessionId() {
-        return sessionId;
-    }
+	public AckManager getAckManager() {
+		return ackManager;
+	}
 
-    public SocketAddress getRemoteAddress() {
-        return handshakeData.getAddress();
-    }
+	public UUID getSessionId() {
+		return sessionId;
+	}
 
-    public void disconnect() {
-        ChannelFuture future = send(new Packet(PacketType.DISCONNECT));
-		if(future != null) {
+	public SocketAddress getRemoteAddress() {
+		return handshakeData.getAddress();
+	}
+
+	public void disconnect() {
+		ChannelFuture future = send(new Packet(PacketType.DISCONNECT));
+		if (future != null) {
 			future.addListener(ChannelFutureListener.CLOSE);
 		}
 
-        onChannelDisconnect();
-    }
+		onChannelDisconnect();
+	}
 
-    public boolean isChannelOpen() {
-        for (TransportState state : channels.values()) {
-            if (state.getChannel() != null
-                    && state.getChannel().isActive()) {
-                return true;
-            }
-        }
-        return false;
-    }
+	public boolean isChannelOpen() {
+		for (TransportState state : channels.values()) {
+			if (state.getChannel() != null
+					&& state.getChannel().isActive()) {
+				return true;
+			}
+		}
+		return false;
+	}
 
-    public Store getStore() {
-        return store;
-    }
+	public Store getStore() {
+		return store;
+	}
 
-    public boolean isTransportChannel(Channel channel, Transport transport) {
-        TransportState state = channels.get(transport);
-        if (state.getChannel() == null) {
-            return false;
-        }
-        return state.getChannel().equals(channel);
-    }
+	public boolean isTransportChannel(Channel channel, Transport transport) {
+		TransportState state = channels.get(transport);
+		if (state.getChannel() == null) {
+			return false;
+		}
+		return state.getChannel().equals(channel);
+	}
 
-    public void upgradeCurrentTransport(Transport currentTransport) {
-        TransportState state = channels.get(currentTransport);
+	public void upgradeCurrentTransport(Transport currentTransport) {
+		TransportState state = channels.get(currentTransport);
 
-        for (Entry<Transport, TransportState> entry : channels.entrySet()) {
-            if (!entry.getKey().equals(currentTransport)) {
+		for (Entry<Transport, TransportState> entry : channels.entrySet()) {
+			if (!entry.getKey().equals(currentTransport)) {
 
-                Queue<Packet> queue = entry.getValue().getPacketsQueue();
-                state.setPacketsQueue(queue);
+				Queue<Packet> queue = entry.getValue().getPacketsQueue();
+				state.setPacketsQueue(queue);
 
-                sendPackets(currentTransport, state.getChannel());
-                this.currentTransport = currentTransport;
-                log.debug("Transport upgraded to: {} for: {}", currentTransport, sessionId);
-                break;
-            }
-        }
-    }
+				sendPackets(currentTransport, state.getChannel());
+				this.currentTransport = currentTransport;
+				log.debug("Transport upgraded to: {} for: {}", currentTransport, sessionId);
+				break;
+			}
+		}
+	}
 
-    public Transport getCurrentTransport() {
-        return currentTransport;
-    }
+	public Transport getCurrentTransport() {
+		return currentTransport;
+	}
 
-    public Queue<Packet> getPacketsQueue(Transport transport) {
-        return channels.get(transport).getPacketsQueue();
-    }
+	public Queue<Packet> getPacketsQueue(Transport transport) {
+		return channels.get(transport).getPacketsQueue();
+	}
 
-    public void setLastBinaryPacket(Packet lastBinaryPacket) {
-        this.lastBinaryPacket = lastBinaryPacket;
-    }
-    public Packet getLastBinaryPacket() {
-        return lastBinaryPacket;
-    }
+	public void setLastBinaryPacket(Packet lastBinaryPacket) {
+		this.lastBinaryPacket = lastBinaryPacket;
+	}
+
+	public Packet getLastBinaryPacket() {
+		return lastBinaryPacket;
+	}
 
 }
